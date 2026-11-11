@@ -205,6 +205,12 @@ button.barra-btn:hover { background: rgba(255,255,255,.08); }
 .quien { text-align: center; color: var(--gris); font-size: 12.5px; margin-top: -6px; }
 .empuje { height: 4px; }
 .ayuda { font-size: 13px; color: var(--gris); margin: -6px 2px 0; }
+.conexion { display: grid; grid-template-columns: 22px 1fr auto; gap: 12px; align-items: center; background: #F1F8E0; border: 1px solid #DCEBBB; border-radius: 16px; padding: 12px 14px; }
+.conexion > svg { width: 22px; height: 22px; color: #5E8F17; }
+.conexion span { display: grid; min-width: 0; }
+.conexion b { font-family: var(--f-titulo); font-weight: 800; font-size: 15px; }
+.conexion small { font-size: 12.5px; color: var(--gris); }
+.conexion button { color: var(--azul); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; padding: 6px; }
 .logo-config { width: 210px; align-self: center; }
 
 /* ---------- Menú lateral ---------- */

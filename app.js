@@ -443,20 +443,33 @@ function formPerfil() {
   });
 }
 function formConfig() {
+  // El enlace y la clave nunca se muestran: solo se pueden reemplazar.
+  const conectado = !!(CFG.api && CFG.clave);
   abrir('Configuración', `
     <img src="img/logo.png" alt="Karim Daily — Cada día, con Karim" class="logo-config">
     <div class="texto-campo"><label for="c-nombre">Tu nombre (para saber quién registró)</label><input id="c-nombre" maxlength="40" value="${esc(CFG.nombre || '')}" placeholder="Ej. Mamá"></div>
-    <div class="texto-campo"><label for="c-api">Enlace de Google (termina en /exec)</label><input id="c-api" inputmode="url" value="${esc(CFG.api || '')}" placeholder="https://script.google.com/macros/s/…/exec"></div>
-    <div class="texto-campo"><label for="c-clave">Clave de la casa</label><input id="c-clave" value="${esc(CFG.clave || '')}" autocomplete="off"></div>
-    <p class="ayuda">Los registros se guardan en la hoja “Karim Daily” de tu Google Drive. En este teléfono solo quedan estos tres datos.</p>
+    ${conectado ? `<div class="conexion" id="c-estado">${ico('i-check')}<span><b>Conectado a Google Drive</b><small>El enlace y la clave están guardados y ocultos.</small></span><button type="button" id="c-cambiar">Cambiar</button></div>` : ''}
+    <div id="c-campos" ${conectado ? 'hidden' : ''} style="display:grid;gap:18px">
+      <div class="texto-campo"><label for="c-api">Enlace de Google (termina en /exec)</label><input id="c-api" type="password" inputmode="url" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec"></div>
+      <div class="texto-campo"><label for="c-clave">Clave de la casa</label><input id="c-clave" type="password" autocomplete="off"></div>
+    </div>
+    <p class="ayuda">Los registros se guardan en la hoja “Karim Daily” de tu Google Drive. En este teléfono solo quedan tu nombre y la conexión.</p>
     <div class="empuje"></div>
-    <button class="btn-guardar" id="c-guardar">Guardar y conectar</button>
+    <button class="btn-guardar" id="c-guardar">${conectado ? 'Guardar' : 'Guardar y conectar'}</button>
     <button class="btn-cancelar" data-cerrar>Cancelar</button>`, c => {
+    const cambiar = $('#c-cambiar', c);
+    if (cambiar) cambiar.addEventListener('click', () => { $('#c-estado', c).hidden = true; $('#c-campos', c).hidden = false; $('#c-api', c).focus(); });
     $('#c-guardar', c).addEventListener('click', async ev => {
-      const api = $('#c-api', c).value.trim();
-      if (api && !/^https:\/\/script\.google(usercontent)?\.com\//.test(api)) { avisar('El enlace debe empezar con https://script.google.com'); return; }
+      const nuevaApi = $('#c-api', c).value.trim(), nuevaClave = $('#c-clave', c).value.trim();
+      const reemplaza = !$('#c-campos', c).hidden;
+      if (reemplaza && (!nuevaApi || !nuevaClave)) { avisar('Escribe el enlace y la clave'); return; }
+      if (reemplaza && !/^https:\/\/script\.google(usercontent)?\.com\//.test(nuevaApi)) { avisar('El enlace debe empezar con https://script.google.com'); return; }
+      const nombre = $('#c-nombre', c).value.trim();
+      if (!reemplaza) {
+        CFG = { ...CFG, nombre }; guardarConfig(CFG); cerrar(); avisar('Guardado'); return;
+      }
       ev.currentTarget.disabled = true;
-      CFG = { nombre: $('#c-nombre', c).value.trim(), api, clave: $('#c-clave', c).value.trim() };
+      CFG = { nombre, api: nuevaApi, clave: nuevaClave };
       guardarConfig(CFG);
       E.cargado = false; E.error = ''; pintar();
       await cargar();
