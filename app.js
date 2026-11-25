@@ -31,7 +31,13 @@ const dos = n => String(n).padStart(2, '0');
 const claveDia = d => `${d.getFullYear()}-${dos(d.getMonth() + 1)}-${dos(d.getDate())}`;
 const hora = d => `${dos(d.getHours())}:${dos(d.getMinutes())}`;
 const textoFecha = d => `${claveDia(d)} ${hora(d)}`;
-const leerFecha = s => { const d = new Date(String(s).replace(' ', 'T')); return isNaN(d) ? null : d; };
+// Acepta "2026-11-25 06:47" y también "2026-11-25 6:47" (Google Sheets a veces quita el cero de la hora)
+const leerFecha = s => {
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2}))?/.exec(String(s ?? '').trim());
+  if (!m) return null;
+  const d = new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0));
+  return isNaN(d) ? null : d;
+};
 const diaCorto = d => `${DIAS[d.getDay()]}, ${d.getDate()} ${MESES[d.getMonth()]}`;
 const diaLista = d => diaCorto(d) + (d.getFullYear() !== new Date().getFullYear() ? ` ${d.getFullYear()}` : '');
 const ico = id => `<svg aria-hidden="true"><use href="#${id}"/></svg>`;
