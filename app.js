@@ -9,6 +9,22 @@ const MESES_L = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio',
 const PORCIONES = [[0.25, '¼'], [0.5, '½'], [1, '1'], [1.5, '1½'], [2, '2+']];
 const HIZO = ['Pipí', 'Popó', 'Pipí y Popó'];
 
+/* Cuidados: baño, uñas y vacunas */
+const CUIDADOS = {
+  'Baño': { ico: 'i-bath', clase: 'bano', corto: 'Baño', titulo: 'baño', nombre: 'Baño',
+    pregunta: '¿Dónde fue el baño?', opciones: ['En casa', 'Peluquería', 'Veterinario'],
+    proximo: 'Próximo baño', sugerencias: [[14, '2 semanas'], [30, '1 mes'], [60, '2 meses']] },
+  'Uñas': { ico: 'i-nails', clase: 'unas', corto: 'Uñas', titulo: 'corte de uñas', nombre: 'Corte de uñas',
+    pregunta: '¿Dónde le cortaron las uñas?', opciones: ['En casa', 'Peluquería', 'Veterinario'],
+    proximo: 'Próximo corte', sugerencias: [[21, '3 semanas'], [30, '1 mes'], [45, '6 semanas']] },
+  'Vacuna': { ico: 'i-syringe', clase: 'vacuna', corto: 'Vacuna', titulo: 'vacuna', nombre: 'Vacuna',
+    pregunta: '¿Qué vacuna le pusieron?', nombres: ['Rabia', 'Séxtuple', 'Óctuple', 'Tos de las perreras', 'Leptospirosis'],
+    proximo: 'Próximo refuerzo', sugerencias: [[30, '1 mes'], [180, '6 meses'], [365, '1 año']] },
+};
+const TIPOS = ['Comida', 'Paseo', ...Object.keys(CUIDADOS)];
+const ICONO = { Comida: 'i-food', Paseo: 'i-paw', 'Baño': 'i-bath', 'Uñas': 'i-nails', Vacuna: 'i-syringe' };
+const CLASE = { Comida: 'comida', Paseo: 'paseo', 'Baño': 'bano', 'Uñas': 'unas', Vacuna: 'vacuna' };
+
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const dos = n => String(n).padStart(2, '0');
@@ -17,7 +33,11 @@ const hora = d => `${dos(d.getHours())}:${dos(d.getMinutes())}`;
 const textoFecha = d => `${claveDia(d)} ${hora(d)}`;
 const leerFecha = s => { const d = new Date(String(s).replace(' ', 'T')); return isNaN(d) ? null : d; };
 const diaCorto = d => `${DIAS[d.getDay()]}, ${d.getDate()} ${MESES[d.getMonth()]}`;
+const diaLista = d => diaCorto(d) + (d.getFullYear() !== new Date().getFullYear() ? ` ${d.getFullYear()}` : '');
 const ico = id => `<svg aria-hidden="true"><use href="#${id}"/></svg>`;
+const chev = () => ico('i-right').replace('<svg', '<svg class="chev"');
+const diaDe = iso => leerFecha(String(iso || '').slice(0, 10) + ' 12:00');
+const lim = (v, a, b) => Math.min(b, Math.max(a, v));
 
 function fraccion(v) {
   const e = Math.floor(v + 1e-9), f = Math.round((v - e) * 4);
@@ -32,6 +52,17 @@ function hace(d) {
   if (h < 24) return `hace ${h} h${h < 6 && m % 60 ? ` ${m % 60} min` : ''}`;
   const dd = Math.floor(h / 24);
   return dd === 1 ? 'ayer' : `hace ${dd} días`;
+}
+function diasHasta(iso) {
+  const d = diaDe(iso); if (!d) return null;
+  const h = new Date();
+  return Math.round((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(h.getFullYear(), h.getMonth(), h.getDate())) / 864e5);
+}
+function cuandoTxt(n) {
+  if (n === 0) return 'hoy';
+  if (n === 1) return 'mañana';
+  if (n === -1) return 'ayer';
+  return n > 0 ? `en ${n} días` : `hace ${-n} días`;
 }
 function iconosHizo(h) {
   if (h === 'Pipí') return ico('i-drop');
@@ -72,13 +103,16 @@ const E = {
 function normalizar(r) {
   const fecha = leerFecha(r.fecha);
   if (!fecha) return null;
-  const tipo = r.tipo === 'Paseo' ? 'Paseo' : 'Comida';
+  const tipo = TIPOS.includes(r.tipo) ? r.tipo : 'Comida';
+  const proxima = String(r.proxima || '').slice(0, 10);
   return {
     id: String(r.id || ''), tipo, fecha,
     porcion: Math.max(0, Number(r.porcion) || 0),
     hizo: HIZO.includes(r.hizo) ? r.hizo : 'Pipí y Popó',
     nota: String(r.nota || '').slice(0, 280),
     quien: String(r.quien || '').slice(0, 40),
+    detalle: String(r.detalle || '').slice(0, 80),
+    proxima: /^\d{4}-\d{2}-\d{2}$/.test(proxima) ? proxima : '',
   };
 }
 function aplicar(respuesta) {
@@ -104,6 +138,14 @@ async function cargarFotos() {
   }
 }
 
+/* Encuadre de la portada: "x,y,zoom" guardado en el perfil (x e y en %, zoom de 1 a 4) */
+function ajustePortada() {
+  const p = String(E.perfil.portadaAjuste || '').split(',').map(Number);
+  if (p.length !== 3 || p.some(isNaN)) return null;
+  return { x: lim(p[0], 0, 100), y: lim(p[1], 0, 100), z: lim(p[2], 1, 4) };
+}
+const estiloAjuste = a => `width:100%;object-position:${a.x}% ${a.y}%;transform:scale(${a.z});transform-origin:${a.x}% ${a.y}%`;
+
 /* Achica la foto en el teléfono antes de subirla (máx. 1000 px, JPG) */
 function prepararFoto(archivo) {
   return new Promise((ok, mal) => {
@@ -126,6 +168,7 @@ const meta = () => { const m = Number(E.perfil.metaComidas); return m > 0 && m <
 /* ---------- conexión con Google Drive (Apps Script) ---------- */
 const demoDatos = (() => {
   const h = new Date(), f = (dd, hh, mm) => textoFecha(new Date(h.getFullYear(), h.getMonth(), h.getDate() - dd, hh, mm));
+  const enDias = n => claveDia(new Date(h.getFullYear(), h.getMonth(), h.getDate() + n));
   return {
     perfil: { nombre: 'Karim', raza: 'Chihuahua', nacimiento: '2016-01-22', peso: '2.8', metaComidas: '2', notas: 'Nuestro pequeño gran amigo ❤️' },
     registros: [
@@ -133,6 +176,9 @@ const demoDatos = (() => {
       { id: 'd2', tipo: 'Paseo', hizo: 'Pipí y Popó', fecha: f(0, 8, 15), nota: 'Paseo corto', quien: 'Ejemplo' },
       { id: 'd3', tipo: 'Paseo', hizo: 'Pipí', fecha: f(1, 19, 20), quien: 'Ejemplo' },
       { id: 'd4', tipo: 'Comida', porcion: 1, fecha: f(2, 8, 0), quien: 'Ejemplo' },
+      { id: 'd5', tipo: 'Baño', detalle: 'En casa', proxima: enDias(4), fecha: f(10, 11, 0), quien: 'Ejemplo' },
+      { id: 'd6', tipo: 'Uñas', detalle: 'Peluquería', proxima: enDias(-2), fecha: f(30, 16, 0), quien: 'Ejemplo' },
+      { id: 'd7', tipo: 'Vacuna', detalle: 'Rabia', proxima: enDias(40), fecha: f(325, 10, 0), quien: 'Ejemplo' },
     ],
   };
 })();
@@ -144,7 +190,10 @@ async function api(accion, datos) {
     if (accion === 'guardar') { demoDatos.registros = demoDatos.registros.filter(r => r.id !== datos.id); demoDatos.registros.push(datos); }
     if (accion === 'borrar') demoDatos.registros = demoDatos.registros.filter(r => r.id !== datos.id);
     if (accion === 'perfil') demoDatos.perfil = { ...demoDatos.perfil, ...datos };
-    if (accion === 'foto') { const id = 'demo-' + Date.now(); demoFotos[id] = datos.data; demoDatos.perfil = { ...demoDatos.perfil, [datos.cual]: id }; }
+    if (accion === 'foto') {
+      const id = 'demo-' + Date.now(); demoFotos[id] = datos.data;
+      demoDatos.perfil = { ...demoDatos.perfil, [datos.cual]: id, ...(datos.cual === 'fotoInicio' ? { portadaAjuste: '' } : {}) };
+    }
     if (accion === 'verFoto') return { ok: true, data: demoFotos[datos.id] };
     return JSON.parse(JSON.stringify({ ok: true, ...demoDatos }));
   }
@@ -199,6 +248,21 @@ function agruparPorDia(lista) {
   lista.forEach(r => { const k = claveDia(r.fecha); if (!m.has(k)) m.set(k, []); m.get(k).push(r); });
   return [...m.values()];
 }
+/* Próximas fechas: la del último baño, la del último corte y la última de cada vacuna */
+function pendientes() {
+  const vistos = new Set(), lista = [];
+  E.registros.forEach(r => {
+    if (!CUIDADOS[r.tipo]) return;
+    const clave = r.tipo === 'Vacuna' ? 'V:' + r.detalle.trim().toLowerCase() : r.tipo;
+    if (vistos.has(clave)) return;
+    vistos.add(clave);
+    const dias = r.proxima ? diasHasta(r.proxima) : null;
+    if (dias !== null) lista.push({ r, dias });
+  });
+  return lista.sort((a, b) => a.dias - b.dias);
+}
+const nombreCuidado = r => r.tipo === 'Vacuna' ? `Vacuna${r.detalle ? ': ' + r.detalle : ''}` : CUIDADOS[r.tipo].nombre;
+const vacunasUsadas = () => [...new Set(E.registros.filter(r => r.tipo === 'Vacuna' && r.detalle).map(r => r.detalle))];
 
 /* ---------- vistas ---------- */
 function barra(titulo, icono, marca) {
@@ -218,10 +282,24 @@ function notaEstado() {
 }
 const sinDatos = () => !DEMO && E.error === 'sin-config';
 
+function botonesCuidado() {
+  return `<div class="botones-cuidado">${Object.entries(CUIDADOS).map(([t, C]) =>
+    `<button class="btn-cuidado" data-nuevo="${t}" ${sinDatos() ? 'disabled' : ''}><span class="burbuja-mini ${C.clase}">${ico(C.ico)}</span>${C.corto}</button>`).join('')}</div>`;
+}
+function recordatorioHTML(p) {
+  const n = p.dias, r = p.r, estado = n < 0 ? ' vencido' : n <= 7 ? ' pronto' : '';
+  const detalle = r.tipo === 'Vacuna' && r.detalle ? ` data-detalle="${esc(r.detalle)}"` : '';
+  return `<button class="recordatorio${estado}" data-nuevo="${r.tipo}"${detalle}>
+    <span class="punto ${CLASE[r.tipo]}">${ico(ICONO[r.tipo])}</span>
+    <span class="fila-txt"><b>${esc(nombreCuidado(r))}</b><small>${n < 0 ? 'Tocaba' : 'Toca'} ${cuandoTxt(n)}, ${fechaLarga(r.proxima)}</small></span>${ico('i-right')}</button>`;
+}
+
 function vistaInicio() {
-  const h = deHoy(), hoy = new Date();
+  const h = deHoy(), hoy = new Date(), a = ajustePortada();
+  const proximos = pendientes().filter(p => p.dias <= 14);
   return `${barra('Karim Daily', 'i-paw', true)}
-  <div class="hero"><img src="${fotoDe('fotoInicio')}" alt="Foto de ${esc(E.perfil.nombre || 'Karim')}" class="${E.fotos.fotoInicio ? 'personal' : ''}"><div class="hola" aria-hidden="true">Hola,<br>Karim!${ico('i-heart')}</div></div>
+  <div class="hero"><img src="${fotoDe('fotoInicio')}" alt="Foto de ${esc(E.perfil.nombre || 'Karim')}" class="${E.fotos.fotoInicio ? 'personal' : ''}"${a ? ` style="${estiloAjuste(a)}"` : ''}>
+    <button class="hero-ajustar" data-ajustar aria-label="Mover o acercar la foto de portada" ${sinDatos() ? 'disabled' : ''}>${ico('i-move')}</button></div>
   <section class="resumen">
     <div class="resumen-cab"><h2 class="titulo-sec">${ico('i-cal')}Resumen de hoy</h2><span class="chip-fecha">${ico('i-clock')}${diaCorto(hoy)}</span></div>
     ${notaEstado()}
@@ -233,24 +311,29 @@ function vistaInicio() {
         <div class="grande num">${h.paseos}</div><div class="unidad">${h.paseos === 1 ? 'salida' : 'salidas'}</div>
         <div class="ultima">${h.ultimoPaseo ? 'Última ' + hace(h.ultimoPaseo.fecha) : '&nbsp;'}</div></div>
     </div>
+    ${proximos.length ? `<h2 class="titulo-sec">${ico('i-heart')}Próximos cuidados</h2><div class="recordatorios">${proximos.map(recordatorioHTML).join('')}</div>` : ''}
     <h2 class="titulo-sec">¿Qué quieres registrar?</h2>
     <div class="botones">
       <button class="btn-grande comida" data-nuevo="Comida" ${sinDatos() ? 'disabled' : ''}>${ico('i-food')}<span>Registrar<br>comida</span></button>
       <button class="btn-grande paseo" data-nuevo="Paseo" ${sinDatos() ? 'disabled' : ''}>${ico('i-paw')}<span>Registrar<br>paseo</span></button>
     </div>
+    ${botonesCuidado()}
   </section>`;
 }
 
 function filaHTML(r) {
-  const texto = r.tipo === 'Comida' ? `${fraccion(r.porcion)} ${r.porcion > 1 ? 'porciones' : 'porción'} · ${hora(r.fecha)}` : `${r.hizo} · ${hora(r.fecha)}`;
-  const extra = [r.nota, r.quien && `por ${r.quien}`].filter(Boolean).map(esc).join(' · ');
+  let texto;
+  if (r.tipo === 'Comida') texto = `${fraccion(r.porcion)} ${r.porcion > 1 ? 'porciones' : 'porción'} · ${hora(r.fecha)}`;
+  else if (r.tipo === 'Paseo') texto = `${r.hizo} · ${hora(r.fecha)}`;
+  else texto = esc(nombreCuidado(r)) + (r.tipo !== 'Vacuna' && r.detalle ? ` · ${esc(r.detalle)}` : '');
+  const extra = [r.proxima && `Próximo: ${fechaLarga(r.proxima)}`, r.nota, r.quien && `por ${r.quien}`].filter(Boolean).map(esc).join(' · ');
   return `<button class="fila" data-editar="${esc(r.id)}">
-    <span class="punto ${r.tipo === 'Comida' ? 'comida' : 'paseo'}">${ico(r.tipo === 'Comida' ? 'i-food' : 'i-paw')}</span>
+    <span class="punto ${CLASE[r.tipo]}">${ico(ICONO[r.tipo])}</span>
     <span class="fila-txt num">${texto}${extra ? `<small>${extra}</small>` : ''}</span>${ico('i-right')}</button>`;
 }
 function listaDias(lista, vacioTitulo, vacioTexto) {
   if (!lista.length) return `<div class="vacio">${ico('i-paw')}<b>${vacioTitulo}</b><span>${vacioTexto}</span></div>`;
-  return `<div class="dias">${agruparPorDia(lista).map(rs => `<div class="dia"><h3>${claveDia(rs[0].fecha) === claveDia(new Date()) ? 'Hoy, ' + rs[0].fecha.getDate() + ' ' + MESES[rs[0].fecha.getMonth()] : diaCorto(rs[0].fecha)}</h3>${rs.map(filaHTML).join('')}</div>`).join('')}</div>`;
+  return `<div class="dias">${agruparPorDia(lista).map(rs => `<div class="dia"><h3>${claveDia(rs[0].fecha) === claveDia(new Date()) ? 'Hoy, ' + rs[0].fecha.getDate() + ' ' + MESES[rs[0].fecha.getMonth()] : diaLista(rs[0].fecha)}</h3>${rs.map(filaHTML).join('')}</div>`).join('')}</div>`;
 }
 function selectorMes() {
   const y = E.mes.getFullYear(), m = E.mes.getMonth(), n = new Date();
@@ -263,7 +346,7 @@ function delMes(lista) {
 }
 function vistaHistorial() {
   return `${barra('Historial', 'i-cal')}<div class="contenido">${notaEstado()}${selectorMes()}
-    ${listaDias(delMes(E.registros), 'Sin registros este mes', 'Aquí aparecerán las comidas y salidas de Karim.')}</div>`;
+    ${listaDias(delMes(E.registros), 'Sin registros este mes', 'Aquí aparecerán las comidas, salidas y cuidados de Karim.')}</div>`;
 }
 function vistaTipo(tipo) {
   const comida = tipo === 'Comida';
@@ -271,6 +354,16 @@ function vistaTipo(tipo) {
     <button class="btn-grande ${comida ? 'comida' : 'paseo'}" data-nuevo="${tipo}" ${sinDatos() ? 'disabled' : ''}>${ico(comida ? 'i-food' : 'i-paw')}<span>Registrar ${comida ? 'comida' : 'paseo'}</span></button>
     ${selectorMes()}
     ${listaDias(delMes(E.registros.filter(r => r.tipo === tipo)), comida ? 'Sin comidas este mes' : 'Sin paseos este mes', comida ? 'Cada comida que registres aparecerá aquí.' : 'Cada salida que registres aparecerá aquí.')}</div>`;
+}
+function vistaCuidados() {
+  const prox = pendientes();
+  return `${barra('Cuidados', 'i-heart')}<div class="contenido">${notaEstado()}
+    ${botonesCuidado()}
+    <h2 class="titulo-sec">${ico('i-cal')}Próximas fechas</h2>
+    ${prox.length ? `<div class="recordatorios">${prox.map(recordatorioHTML).join('')}</div>`
+      : `<p class="ayuda sin-margen">Cuando registres un baño, un corte de uñas o una vacuna con fecha para la próxima vez, aparecerá aquí.</p>`}
+    <h2 class="titulo-sec">${ico('i-note')}Registros</h2>
+    ${listaDias(E.registros.filter(r => CUIDADOS[r.tipo]), 'Sin cuidados registrados', 'Aquí aparecerán los baños, cortes de uñas y vacunas.')}</div>`;
 }
 function edad(iso) {
   const b = leerFecha(iso + ' 12:00'); if (!b) return '';
@@ -281,6 +374,9 @@ function edad(iso) {
 function fechaLarga(iso) { const d = leerFecha(iso + ' 12:00'); return d ? `${dos(d.getDate())}/${dos(d.getMonth() + 1)}/${d.getFullYear()}` : '—'; }
 function vistaKarim() {
   const p = E.perfil, nombre = p.nombre || 'Karim';
+  const ultimo = t => E.registros.find(r => r.tipo === t);
+  const bano = ultimo('Baño'), unas = ultimo('Uñas');
+  const vacuna = pendientes().find(x => x.r.tipo === 'Vacuna' && x.dias >= -30);
   return `${barra(esc(nombre), 'i-paw')}
   ${notaEstado() ? `<div class="contenido" style="padding-bottom:0">${notaEstado()}</div>` : ''}
   <div class="perfil">
@@ -295,11 +391,18 @@ function vistaKarim() {
     <div class="dato">${ico('i-bowl')}<span>Comidas al día</span><b class="num">${porcionTxt(meta())}</b></div>
     <div class="dato notas">${ico('i-note')}<div><span>Notas</span><b>${esc(p.notas || '—')}</b></div></div>
   </div>
+  <h2 class="titulo-sec perfil-sec">${ico('i-heart')}Cuidados</h2>
+  <div class="datos">
+    <div class="dato">${ico('i-bath')}<span>Último baño</span><b>${bano ? hace(bano.fecha) : '—'}</b></div>
+    <div class="dato">${ico('i-nails')}<span>Último corte de uñas</span><b>${unas ? hace(unas.fecha) : '—'}</b></div>
+    <div class="dato">${ico('i-syringe')}<span>Próxima vacuna</span><b class="num">${vacuna ? `${esc(vacuna.r.detalle || 'Vacuna')}, ${fechaLarga(vacuna.r.proxima)}` : '—'}</b></div>
+    <button class="dato ver-todo" data-ir="cuidados">${ico('i-cal')}<span>Ver todos los cuidados</span>${chev()}</button>
+  </div>
   <div style="height:22px"></div>`;
 }
 
 function pintar() {
-  const v = { inicio: vistaInicio, comidas: () => vistaTipo('Comida'), paseos: () => vistaTipo('Paseo'), historial: vistaHistorial, karim: vistaKarim }[E.pestana];
+  const v = { inicio: vistaInicio, comidas: () => vistaTipo('Comida'), paseos: () => vistaTipo('Paseo'), cuidados: vistaCuidados, historial: vistaHistorial, karim: vistaKarim }[E.pestana];
   $('#vista').innerHTML = v();
   document.querySelectorAll('.tab').forEach(b => b.dataset.tab === E.pestana ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'));
 }
@@ -320,8 +423,8 @@ function cerrar() {
   volverA && volverA.focus && volverA.focus();
 }
 function campoHora(etiqueta, fecha, compacto) {
-  if (compacto) return `<label class="campo compacto">${ico('i-clock')}<span>${etiqueta}</span><input id="f-hora" type="time" value="${hora(fecha)}" required>${ico('i-right').replace('<svg', '<svg class="chev"')}</label>`;
-  return `<label class="campo grande">${ico('i-clock')}<span class="campo-etq"><small>${etiqueta}</small><input id="f-hora" type="time" value="${hora(fecha)}" required></span><span></span>${ico('i-right').replace('<svg', '<svg class="chev"')}</label>`;
+  if (compacto) return `<label class="campo compacto">${ico('i-clock')}<span>${etiqueta}</span><input id="f-hora" type="time" value="${hora(fecha)}" required>${chev()}</label>`;
+  return `<label class="campo grande">${ico('i-clock')}<span class="campo-etq"><small>${etiqueta}</small><input id="f-hora" type="time" value="${hora(fecha)}" required></span><span></span>${chev()}</label>`;
 }
 function fechaElegida(cuerpo, base) {
   const [hh, mm] = ($('#f-hora', cuerpo).value || hora(base)).split(':').map(Number);
@@ -348,6 +451,12 @@ function conectarEliminar(cuerpo, reg) {
   });
 }
 const nuevoId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+function abrirForm(tipo, reg, detalle) {
+  if (tipo === 'Comida') formComida(reg);
+  else if (tipo === 'Paseo') formPaseo(reg);
+  else if (CUIDADOS[tipo]) formCuidado(tipo, reg, detalle);
+}
 
 function formComida(reg) {
   const base = reg ? reg.fecha : new Date();
@@ -395,6 +504,125 @@ function formPaseo(reg) {
     conectarEliminar(c, reg);
   });
 }
+
+/* Baño, corte de uñas o vacuna */
+function formCuidado(tipo, reg, detallePre) {
+  const C = CUIDADOS[tipo];
+  const base = reg ? reg.fecha : new Date();
+  const anterior = E.registros.find(r => r.tipo === tipo && r.detalle);
+  let detalle = reg ? reg.detalle : (detallePre || (C.opciones ? (anterior && C.opciones.includes(anterior.detalle) ? anterior.detalle : C.opciones[0]) : ''));
+  const nombres = C.nombres ? [...new Set(C.nombres.concat(vacunasUsadas()))] : [];
+  abrir(`${reg ? 'Editar' : 'Registrar'} ${C.titulo}`, `
+    <svg class="huella"><use href="#i-paw"/></svg>
+    <div class="pregunta"><div class="burbuja ${C.clase}">${ico(C.ico)}</div><h2>${C.pregunta}</h2></div>
+    ${C.opciones
+      ? `<div class="chips" role="group" aria-label="Dónde">${C.opciones.map(o => `<button type="button" class="chip" data-d="${esc(o)}" aria-pressed="${o === detalle}">${esc(o)}</button>`).join('')}</div>`
+      : `<div class="texto-campo"><label for="f-detalle">Nombre de la vacuna</label><input id="f-detalle" list="l-vacunas" maxlength="80" autocomplete="off" value="${esc(detalle)}" placeholder="Ej. Rabia"></div>
+         <datalist id="l-vacunas">${nombres.map(n => `<option value="${esc(n)}">`).join('')}</datalist>`}
+    <label class="campo compacto">${ico('i-cal')}<span>Día</span><input id="f-dia" type="date" value="${claveDia(base)}" max="${claveDia(new Date())}" required>${chev()}</label>
+    <div class="proxima">
+      <div class="texto-campo"><label for="f-proxima">${C.proximo} (opcional)</label><input id="f-proxima" type="date" value="${esc(reg ? reg.proxima : '')}"></div>
+      <div class="sugerencias" role="group" aria-label="Elegir la próxima fecha">
+        ${C.sugerencias.map(([d, l]) => `<button type="button" data-mas="${d}">En ${l}</button>`).join('')}
+        <button type="button" data-mas="">Sin fecha</button>
+      </div>
+    </div>
+    <div class="area">${ico('i-chat')}<label for="f-nota">Observaciones (opcional)</label><textarea id="f-nota" maxlength="280" rows="2" placeholder="${tipo === 'Vacuna' ? 'Ej. Veterinario, lote…' : 'Ej. Se portó muy bien'}">${reg ? esc(reg.nota) : ''}</textarea></div>
+    ${pieFormulario(reg)}`, c => {
+    c.querySelectorAll('[data-d]').forEach(b => b.addEventListener('click', () => {
+      detalle = b.dataset.d; c.querySelectorAll('[data-d]').forEach(x => x.setAttribute('aria-pressed', x === b));
+    }));
+    c.querySelectorAll('[data-mas]').forEach(b => b.addEventListener('click', () => {
+      const prox = $('#f-proxima', c);
+      if (b.dataset.mas === '') { prox.value = ''; return; }
+      const d = diaDe($('#f-dia', c).value) || new Date();
+      d.setDate(d.getDate() + Number(b.dataset.mas));
+      prox.value = claveDia(d);
+    }));
+    $('#f-guardar', c).addEventListener('click', async ev => {
+      const boton = ev.currentTarget;
+      if (!C.opciones) {
+        detalle = $('#f-detalle', c).value.trim();
+        if (!detalle) { avisar('Escribe el nombre de la vacuna'); $('#f-detalle', c).focus(); return; }
+      }
+      const dia = $('#f-dia', c).value;
+      if (!diaDe(dia)) { avisar('Elige el día'); return; }
+      boton.disabled = true;
+      const datos = {
+        id: reg ? reg.id : nuevoId(), tipo, detalle,
+        fecha: `${dia} ${hora(base)}`,
+        proxima: $('#f-proxima', c).value,
+        nota: $('#f-nota', c).value.trim(),
+        quien: reg ? reg.quien : (CFG.nombre || ''),
+      };
+      if (await escribir('guardar', datos, reg ? 'Registro actualizado' : `Anotado: ${C.titulo}`)) cerrar(); else boton.disabled = false;
+    });
+    conectarEliminar(c, reg);
+  });
+}
+
+/* Mover y acercar la foto de portada */
+function formPortada() {
+  let a = ajustePortada() || { x: 50, y: E.fotos.fotoInicio ? 35 : 30, z: 1 };
+  const anchoPortada = Math.min(window.innerWidth, 440);
+  abrir('Ajustar portada', `
+    <p class="ayuda sin-margen">Arrastra la foto para moverla. Para acercarla, pellizca con dos dedos o usa la barra.</p>
+    <div class="ajuste-caja" id="a-caja" style="aspect-ratio:${anchoPortada} / 290">
+      <img id="a-img" src="${fotoDe('fotoInicio')}" alt="" draggable="false">
+      <div class="ajuste-tapa" aria-hidden="true"></div>
+    </div>
+    <p class="ayuda sin-margen">La franja clara de abajo queda tapada por el resumen.</p>
+    <div class="zoom"><span aria-hidden="true">−</span><input id="a-zoom" type="range" min="1" max="4" step="0.01" aria-label="Acercar o alejar"><span aria-hidden="true">+</span></div>
+    <button type="button" class="btn-cancelar" id="a-centrar">Volver a centrar</button>
+    <div class="empuje"></div>
+    <button class="btn-guardar" id="a-guardar">Guardar portada</button>
+    <button class="btn-cancelar" data-cerrar>Cancelar</button>`, c => {
+    const caja = $('#a-caja', c), img = $('#a-img', c), zoom = $('#a-zoom', c);
+    const dibujar = () => { img.style.cssText = estiloAjuste(a); zoom.value = a.z; };
+    // Mueve la foto lo mismo que el dedo (calcula cuánto sobra de la imagen en cada lado)
+    const mover = (dx, dy) => {
+      const w = caja.clientWidth, h = caja.clientHeight;
+      const nw = img.naturalWidth || w, nh = img.naturalHeight || h;
+      const k = Math.max(w / nw, h / nh), sobraX = nw * k * a.z - w, sobraY = nh * k * a.z - h;
+      if (sobraX > 0.5) a.x = lim(a.x - dx * 100 / sobraX, 0, 100);
+      if (sobraY > 0.5) a.y = lim(a.y - dy * 100 / sobraY, 0, 100);
+    };
+    const dedos = new Map(); let ultimo = null;
+    const centro = () => {
+      const v = [...dedos.values()];
+      if (v.length === 1) return { x: v[0].x, y: v[0].y };
+      return { x: (v[0].x + v[1].x) / 2, y: (v[0].y + v[1].y) / 2, d: Math.hypot(v[0].x - v[1].x, v[0].y - v[1].y) };
+    };
+    caja.addEventListener('pointerdown', e => {
+      caja.setPointerCapture(e.pointerId);
+      dedos.set(e.pointerId, { x: e.clientX, y: e.clientY }); ultimo = centro();
+    });
+    caja.addEventListener('pointermove', e => {
+      if (!dedos.has(e.pointerId)) return;
+      dedos.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const s = centro();
+      if (ultimo) {
+        if (s.d && ultimo.d) a.z = lim(a.z * s.d / ultimo.d, 1, 4);
+        mover(s.x - ultimo.x, s.y - ultimo.y);
+        dibujar();
+      }
+      ultimo = s;
+    });
+    const soltar = e => { dedos.delete(e.pointerId); ultimo = dedos.size ? centro() : null; };
+    caja.addEventListener('pointerup', soltar);
+    caja.addEventListener('pointercancel', soltar);
+    caja.addEventListener('wheel', e => { e.preventDefault(); a.z = lim(a.z * Math.exp(-e.deltaY * 0.0015), 1, 4); dibujar(); }, { passive: false });
+    zoom.addEventListener('input', () => { a.z = Number(zoom.value); dibujar(); });
+    $('#a-centrar', c).addEventListener('click', () => { a = { x: 50, y: 35, z: 1 }; dibujar(); });
+    $('#a-guardar', c).addEventListener('click', async ev => {
+      const boton = ev.currentTarget; boton.disabled = true;
+      const valor = [a.x.toFixed(1), a.y.toFixed(1), a.z.toFixed(2)].join(',');
+      if (await escribir('perfil', { portadaAjuste: valor }, 'Portada guardada')) cerrar(); else boton.disabled = false;
+    });
+    dibujar();
+  });
+}
+
 function formPerfil() {
   const p = E.perfil;
   const tarjetaFoto = (cual, titulo, clase) => `
@@ -405,7 +633,7 @@ function formPerfil() {
     </div>`;
   abrir('Editar perfil', `
     ${tarjetaFoto('foto', 'Foto de perfil', 'redonda')}
-    ${tarjetaFoto('fotoInicio', 'Foto de inicio', 'ancha')}
+    ${tarjetaFoto('fotoInicio', 'Foto de portada', 'ancha')}
     <div class="texto-campo"><label for="p-nombre">Nombre</label><input id="p-nombre" maxlength="40" value="${esc(p.nombre || 'Karim')}"></div>
     <div class="texto-campo"><label for="p-raza">Raza</label><input id="p-raza" maxlength="60" value="${esc(p.raza || '')}"></div>
     <div class="dos">
@@ -428,7 +656,8 @@ function formPerfil() {
         E.fotos[cual] = data; E.fotoIds[cual] = (r.perfil || {})[cual] || '';
         aplicar(r); pintar();
         const m = $('#m-' + cual, c); m.style.backgroundImage = `url('${data}')`; m.classList.add('personal');
-        estado.textContent = 'Foto guardada'; avisar('Foto actualizada');
+        estado.textContent = cual === 'fotoInicio' ? 'Guardada. Para encuadrarla, usa el botón de flechas en la portada.' : 'Foto guardada';
+        avisar('Foto actualizada');
       } catch (e) {
         estado.textContent = e.message === 'imagen' ? 'No se pudo leer esa imagen. Prueba con otra.' : 'No se pudo subir. Revisa tu conexión.';
       }
@@ -486,15 +715,16 @@ function avisar(msg) {
 
 /* ---------- eventos ---------- */
 document.addEventListener('click', ev => {
-  const t = ev.target.closest('[data-tab],[data-ir],[data-nuevo],[data-editar],[data-mes],[data-cerrar],[data-perfil],[data-config],[data-menu],[data-menu-cerrar],[data-recargar]');
+  const t = ev.target.closest('[data-tab],[data-ir],[data-nuevo],[data-editar],[data-mes],[data-cerrar],[data-perfil],[data-ajustar],[data-config],[data-menu],[data-menu-cerrar],[data-recargar]');
   if (!t || t.disabled) return;
   const d = t.dataset;
   if (d.tab || d.ir) { E.pestana = d.tab || d.ir; $('#menu').hidden = true; pintar(); scrollTo(0, 0); }
-  else if (d.nuevo) (d.nuevo === 'Comida' ? formComida : formPaseo)(null);
-  else if (d.editar) { const r = E.registros.find(x => x.id === d.editar); if (r) (r.tipo === 'Comida' ? formComida : formPaseo)(r); }
+  else if (d.nuevo) abrirForm(d.nuevo, null, d.detalle);
+  else if (d.editar) { const r = E.registros.find(x => x.id === d.editar); if (r) abrirForm(r.tipo, r); }
   else if (d.mes) { E.mes = new Date(E.mes.getFullYear(), E.mes.getMonth() + Number(d.mes), 1); pintar(); }
   else if ('cerrar' in d) cerrar();
   else if ('perfil' in d) formPerfil();
+  else if ('ajustar' in d) formPortada();
   else if ('config' in d) { $('#menu').hidden = true; formConfig(); }
   else if ('menu' in d) $('#menu').hidden = false;
   else if ('menuCerrar' in d) $('#menu').hidden = true;
