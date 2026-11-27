@@ -1,5 +1,6 @@
 /* Karim Daily — los datos viven en una hoja de Google Sheets de tu Google Drive.
-   En este equipo solo se guarda la configuración (enlace, clave y tu nombre), nunca los registros. */
+   El teléfono guarda la configuración (enlace, clave y tu nombre) y una copia de los últimos datos
+   y fotos para abrir al instante; esa copia se actualiza desde Drive cada vez que se abre la app. */
 'use strict';
 
 /* ---------- utilidades ---------- */
@@ -64,6 +65,16 @@ function diasHasta(iso) {
   const h = new Date();
   return Math.round((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(h.getFullYear(), h.getMonth(), h.getDate())) / 864e5);
 }
+function haceDias(d) {
+  const n = -diasHasta(claveDia(d));
+  if (n <= 0) return 'Hoy';
+  if (n === 1) return 'Ayer';
+  if (n < 45) return `Hace ${n} días`;
+  const m = Math.round(n / 30.4);
+  if (m < 12) return `Hace ${m} meses`;
+  const a = Math.floor(n / 365);
+  return `Hace ${a} ${a === 1 ? 'año' : 'años'}`;
+}
 function cuandoTxt(n) {
   if (n === 0) return 'hoy';
   if (n === 1) return 'mañana';
@@ -93,6 +104,13 @@ let CFG = leerConfig();
 })();
 const DEMO = new URLSearchParams(location.search).has('demo');
 
+/* Copia local para abrir rápido: últimos datos y las dos fotos (se reemplaza en cada lectura) */
+const CACHE_KEY = 'karim-daily-cache', FOTOS_KEY = 'karim-daily-fotos';
+function leerLocal(k, vacio) { try { return JSON.parse(localStorage.getItem(k) || 'null') || vacio; } catch (e) { return vacio; } }
+function guardarLocal(k, v) { if (DEMO) return; try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+function borrarLocal() { try { localStorage.removeItem(CACHE_KEY); localStorage.removeItem(FOTOS_KEY); } catch (e) {} }
+function guardarFotoLocal(cual, id, data) { const f = leerLocal(FOTOS_KEY, {}); f[cual] = { id, data }; guardarLocal(FOTOS_KEY, f); }
+
 /* ---------- estado (solo en memoria) ---------- */
 const E = {
   pestana: 'inicio',
@@ -121,27 +139,37 @@ function normalizar(r) {
     proxima: /^\d{4}-\d{2}-\d{2}$/.test(proxima) ? proxima : '',
   };
 }
-function aplicar(respuesta) {
+function aplicar(respuesta, desdeCopia) {
   E.registros = (respuesta.registros || []).map(normalizar).filter(Boolean).sort((a, b) => b.fecha - a.fecha);
   E.perfil = respuesta.perfil || {};
-  E.cargado = true; E.error = '';
+  E.cargado = true;
+  if (!desdeCopia) { E.error = ''; guardarLocal(CACHE_KEY, { registros: respuesta.registros || [], perfil: E.perfil }); }
   cargarFotos();
 }
 
 /* Fotos de Karim guardadas en Drive: "foto" (perfil) y "fotoInicio" (portada) */
 const FOTOS = { foto: 'img/karim-perfil.jpg', fotoInicio: 'img/karim-inicio.jpg' };
-const fotoDe = cual => E.fotos[cual] || FOTOS[cual];
-async function cargarFotos() {
-  for (const cual of Object.keys(FOTOS)) {
+// Mientras no se sepa cuál es la foto de Karim (o se esté bajando), no se muestra la de ejemplo
+function fotoDe(cual) {
+  if (E.fotos[cual]) return E.fotos[cual];
+  if (!E.cargado || E.perfil[cual]) return '';
+  return FOTOS[cual];
+}
+// Las dos fotos se piden a la vez, y solo si cambiaron desde la última vez
+function cargarFotos() {
+  const locales = leerLocal(FOTOS_KEY, {});
+  Object.keys(FOTOS).forEach(async cual => {
     const id = E.perfil[cual] || '';
-    if (id === (E.fotoIds[cual] || '')) continue;
+    if (id === (E.fotoIds[cual] || '')) return;
     E.fotoIds[cual] = id;
-    if (!id) { delete E.fotos[cual]; pintar(); continue; }
+    if (!id) { delete E.fotos[cual]; pintar(); return; }
+    const local = locales[cual];
+    if (local && local.id === id && local.data) { E.fotos[cual] = local.data; pintar(); return; }
     try {
       const r = await api('verFoto', { id });
-      if (E.fotoIds[cual] === id && r.data) { E.fotos[cual] = r.data; pintar(); }
+      if (E.fotoIds[cual] === id && r.data) { E.fotos[cual] = r.data; guardarFotoLocal(cual, id, r.data); pintar(); }
     } catch (e) { E.fotoIds[cual] = ''; }
-  }
+  });
 }
 
 /* Encuadre de la portada: "x,y,zoom" guardado en el perfil (x e y en %, zoom de 1 a 4) */
@@ -152,13 +180,13 @@ function ajustePortada() {
 }
 const estiloAjuste = a => `width:100%;object-position:${a.x}% ${a.y}%;transform:scale(${a.z});transform-origin:${a.x}% ${a.y}%`;
 
-/* Achica la foto en el teléfono antes de subirla (máx. 1000 px, JPG) */
-function prepararFoto(archivo) {
+/* Achica la foto en el teléfono antes de subirla (portada 1000 px, perfil 600 px, JPG) */
+function prepararFoto(archivo, max = 1000) {
   return new Promise((ok, mal) => {
     const url = URL.createObjectURL(archivo);
     const img = new Image();
     img.onload = () => {
-      const max = 1000, k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+      const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
       const c = document.createElement('canvas');
       c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
       c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
@@ -169,6 +197,7 @@ function prepararFoto(archivo) {
     img.src = url;
   });
 }
+const fondoFoto = cual => fotoDe(cual) ? `background-image:url('${fotoDe(cual)}')` : 'background-image:none';
 const meta = () => { const m = Number(E.perfil.metaComidas); return m > 0 && m < 10 ? m : 2; };
 
 /* ---------- conexión con Google Drive (Apps Script) ---------- */
@@ -289,8 +318,12 @@ function notaEstado() {
 const sinDatos = () => !DEMO && E.error === 'sin-config';
 
 function botonesCuidado() {
-  return `<div class="botones-cuidado">${Object.entries(CUIDADOS).map(([t, C]) =>
-    `<button class="btn-cuidado" data-nuevo="${t}" ${sinDatos() ? 'disabled' : ''}><span class="burbuja-mini ${C.clase}">${ico(C.ico)}</span>${C.corto}</button>`).join('')}</div>`;
+  return `<div class="botones-cuidado">${Object.entries(CUIDADOS).map(([t, C]) => {
+    const ultimo = E.registros.find(r => r.tipo === t);
+    return `<button class="btn-cuidado" data-nuevo="${t}" aria-label="Registrar ${C.titulo}" ${sinDatos() ? 'disabled' : ''}>
+      <span class="burbuja-mini ${C.clase}">${ico(C.ico)}</span><b>${C.corto}</b>
+      <small>${ultimo ? haceDias(ultimo.fecha) : 'Sin registros'}</small></button>`;
+  }).join('')}</div>`;
 }
 function recordatorioHTML(p) {
   const n = p.dias, r = p.r, estado = n < 0 ? ' vencido' : n <= 7 ? ' pronto' : '';
@@ -304,7 +337,7 @@ function vistaInicio() {
   const h = deHoy(), hoy = new Date(), a = ajustePortada();
   const proximos = pendientes().filter(p => p.dias <= 14);
   return `${barra('Karim Daily', 'i-paw', true)}
-  <div class="hero"><img src="${fotoDe('fotoInicio')}" alt="Foto de ${esc(E.perfil.nombre || 'Karim')}" class="${E.fotos.fotoInicio ? 'personal' : ''}"${a ? ` style="${estiloAjuste(a)}"` : ''}>
+  <div class="hero">${fotoDe('fotoInicio') ? `<img src="${fotoDe('fotoInicio')}" alt="Foto de ${esc(E.perfil.nombre || 'Karim')}" class="${E.fotos.fotoInicio ? 'personal' : ''}"${a ? ` style="${estiloAjuste(a)}"` : ''}>` : ''}
     <button class="hero-ajustar" data-ajustar aria-label="Mover o acercar la foto de portada" ${sinDatos() ? 'disabled' : ''}>${ico('i-move')}</button></div>
   <section class="resumen">
     <div class="resumen-cab"><h2 class="titulo-sec">${ico('i-cal')}Resumen de hoy</h2><span class="chip-fecha">${ico('i-clock')}${diaCorto(hoy)}</span></div>
@@ -386,7 +419,7 @@ function vistaKarim() {
   return `${barra(esc(nombre), 'i-paw')}
   ${notaEstado() ? `<div class="contenido" style="padding-bottom:0">${notaEstado()}</div>` : ''}
   <div class="perfil">
-    <div class="foto-perfil"><div class="foto${E.fotos.foto ? ' personal' : ''}" role="img" aria-label="Foto de ${esc(nombre)}" style="background-image:url('${fotoDe('foto')}')"></div><button data-perfil aria-label="Editar foto y datos de ${esc(nombre)}" ${sinDatos() ? 'disabled' : ''}>${ico('i-pencil')}</button></div>
+    <div class="foto-perfil"><div class="foto${E.fotos.foto ? ' personal' : ''}" role="img" aria-label="Foto de ${esc(nombre)}" style="${fondoFoto('foto')}"></div><button data-perfil aria-label="Editar foto y datos de ${esc(nombre)}" ${sinDatos() ? 'disabled' : ''}>${ico('i-pencil')}</button></div>
     <h2>${esc(nombre)} ${ico('i-heart')}</h2>
   </div>
   <div class="datos">
@@ -633,7 +666,7 @@ function formPerfil() {
   const p = E.perfil;
   const tarjetaFoto = (cual, titulo, clase) => `
     <div class="cambiar-foto">
-      <div class="miniatura ${clase}${E.fotos[cual] ? ' personal' : ''}" id="m-${cual}" style="background-image:url('${fotoDe(cual)}')"></div>
+      <div class="miniatura ${clase}${E.fotos[cual] ? ' personal' : ''}" id="m-${cual}" style="${fondoFoto(cual)}"></div>
       <div class="cambiar-foto-txt"><b>${titulo}</b><span id="e-${cual}">Toca para elegir otra</span></div>
       <label class="btn-foto">Cambiar<input type="file" accept="image/*" data-subir="${cual}" hidden></label>
     </div>`;
@@ -657,9 +690,10 @@ function formPerfil() {
       const cual = inp.dataset.subir, estado = $('#e-' + cual, c), boton = inp.parentElement;
       boton.classList.add('ocupado'); estado.textContent = 'Subiendo a Google Drive…';
       try {
-        const data = await prepararFoto(archivo);
+        const data = await prepararFoto(archivo, cual === 'foto' ? 600 : 1000);
         const r = await api('foto', { cual, data });
         E.fotos[cual] = data; E.fotoIds[cual] = (r.perfil || {})[cual] || '';
+        if (E.fotoIds[cual]) guardarFotoLocal(cual, E.fotoIds[cual], data);
         aplicar(r); pintar();
         const m = $('#m-' + cual, c); m.style.backgroundImage = `url('${data}')`; m.classList.add('personal');
         estado.textContent = cual === 'fotoInicio' ? 'Guardada. Para encuadrarla, usa el botón de flechas en la portada.' : 'Foto guardada';
@@ -688,7 +722,7 @@ function formConfig() {
       <div class="texto-campo"><label for="c-api">Enlace de Google (termina en /exec)</label><input id="c-api" type="password" inputmode="url" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec"></div>
       <div class="texto-campo"><label for="c-clave">Clave de la casa</label><input id="c-clave" type="password" autocomplete="off"></div>
     </div>
-    <p class="ayuda">Los registros se guardan en la hoja “Karim Daily” de tu Google Drive. En este teléfono solo quedan tu nombre y la conexión.</p>
+    <p class="ayuda">Los registros se guardan en la hoja “Karim Daily” de tu Google Drive. Este teléfono guarda tu nombre, la conexión y una copia para abrir más rápido, que se actualiza sola.</p>
     <div class="empuje"></div>
     <button class="btn-guardar" id="c-guardar">${conectado ? 'Guardar' : 'Guardar y conectar'}</button>
     <button class="btn-cancelar" data-cerrar>Cancelar</button>`, c => {
@@ -706,6 +740,7 @@ function formConfig() {
       ev.currentTarget.disabled = true;
       CFG = { nombre, api: nuevaApi, clave: nuevaClave };
       guardarConfig(CFG);
+      borrarLocal(); E.fotos = {}; E.fotoIds = {}; E.registros = []; E.perfil = {};
       E.cargado = false; E.error = ''; pintar();
       await cargar();
       if (!E.error) { cerrar(); avisar('Conectado con Google Drive'); } else ev.target.disabled = false;
@@ -745,5 +780,7 @@ document.addEventListener('keydown', ev => {
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && $('#pantalla').hidden) cargar(true); });
 setInterval(() => { if (document.visibilityState === 'visible' && $('#pantalla').hidden) cargar(true); }, 120000);
 
+// Abre al instante con la última copia guardada y luego trae lo nuevo de Drive
+if (!DEMO && CFG.api && CFG.clave) { const copia = leerLocal(CACHE_KEY, null); if (copia) aplicar(copia, true); }
 pintar();
 cargar(true).then(() => { if (!DEMO && E.error === 'sin-config') formConfig(); });
